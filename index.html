@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BB // TODO</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<canvas id="particles"></canvas>
+
+<div class="app">
+  <!-- ===== SIDE PANEL ===== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="logo">BB<span>//</span>TODO</div>
+      <button class="icon-btn" id="collapseBtn" title="Collapse panel">&#10094;</button>
+    </div>
+
+    <button class="new-list-btn" id="newListBtn">
+      <span class="plus">+</span> NEW LIST
+    </button>
+
+    <div class="new-list-form hidden" id="newListForm">
+      <input type="text" id="newListInput" placeholder="List name..." maxlength="40">
+      <div class="form-actions">
+        <button class="mini-btn accent" id="createListBtn">CREATE</button>
+        <button class="mini-btn" id="cancelListBtn">CANCEL</button>
+      </div>
+    </div>
+
+    <div class="sidebar-label">SAVED LISTS <span class="line"></span></div>
+    <nav class="list-nav" id="listNav"></nav>
+
+    <div class="sidebar-foot">
+      <button class="foot-btn" id="settingsBtn">&#9881; SETTINGS</button>
+      <button class="foot-btn" id="themeQuickBtn" title="Toggle light / dark">&#9680; THEME</button>
+    </div>
+  </aside>
+
+  <button class="sidebar-reveal hidden" id="revealBtn" title="Open panel">&#10095;</button>
+
+  <!-- ===== MAIN ===== -->
+  <main class="main">
+    <div class="empty-state" id="emptyState">
+      <div class="empty-mark">///</div>
+      <h2>NO LIST SELECTED</h2>
+      <p>Create a new list from the side panel to begin.</p>
+    </div>
+
+    <section class="board hidden" id="board">
+      <header class="board-head">
+        <div>
+          <h1 class="board-title" id="boardTitle" title="Double-click to rename">LIST</h1>
+          <div class="board-meta" id="boardMeta"></div>
+        </div>
+        <div class="board-stats" id="boardStats"></div>
+      </header>
+
+      <div class="add-item-row">
+        <span class="prompt">&gt;_</span>
+        <input type="text" id="addItemInput" placeholder="Add a task and press Enter..." maxlength="200">
+        <button class="mini-btn accent" id="addItemBtn">ADD</button>
+      </div>
+
+      <div class="items" id="items"></div>
+
+      <div class="board-hint">Drag tasks to reorder &middot; drag onto a list in the side panel to move it there &middot; drag a task into a sublist to nest it</div>
+    </section>
+  </main>
+</div>
+
+<!-- ===== SETTINGS MODAL ===== -->
+<div class="modal-backdrop hidden" id="settingsModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h2>SETTINGS</h2>
+      <button class="icon-btn" id="closeSettingsBtn">&#10005;</button>
+    </div>
+
+    <div class="settings-section">
+      <div class="section-label">THEMES <span class="line"></span></div>
+      <div class="theme-grid" id="themeGrid">
+        <button class="theme-card" data-theme-pick="light">
+          <span class="swatch swatch-light"></span>
+          <span class="theme-name">LIGHT</span>
+        </button>
+        <button class="theme-card" data-theme-pick="dark">
+          <span class="swatch swatch-dark"></span>
+          <span class="theme-name">DARK</span>
+        </button>
+        <div class="theme-card ghost">
+          <span class="swatch swatch-ghost">+</span>
+          <span class="theme-name">MORE SOON</span>
+        </div>
+      </div>
+      <div class="accent-rows">
+        <label class="accent-row">
+          <span>Accent colour &mdash; LIGHT</span>
+          <input type="color" id="accentLight">
+        </label>
+        <label class="accent-row">
+          <span>Accent colour &mdash; DARK</span>
+          <input type="color" id="accentDark">
+        </label>
+        <button class="mini-btn" id="accentResetBtn">RESET ACCENTS</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="section-label">BACKGROUND <span class="line"></span></div>
+      <label class="toggle-row">
+        <span>Particle effects</span>
+        <input type="checkbox" id="particlesToggle" checked>
+        <span class="toggle-ui"></span>
+      </label>
+    </div>
+
+    <div class="settings-section">
+      <div class="section-label">STORAGE <span class="line"></span></div>
+      <p class="settings-note">Data autosaves in this browser. Link the project folder to also keep a <b>todos.json</b> file on disk.</p>
+      <div class="storage-row">
+        <button class="mini-btn accent" id="linkFolderBtn">LINK PROJECT FOLDER</button>
+        <span class="storage-status" id="storageStatus">Browser storage only</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
