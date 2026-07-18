@@ -146,6 +146,13 @@ function updateGsyncUI() {
   document.getElementById("gSignInBtn").classList.toggle("hidden", signedIn);
   document.getElementById("gSignOutBtn").classList.toggle("hidden", !signedIn);
   document.getElementById("gSyncNowBtn").classList.toggle("hidden", !signedIn);
+  const foot = document.getElementById("gFootBtn");
+  if (foot) {
+    foot.classList.toggle("synced", signedIn);
+    foot.innerHTML = signedIn
+      ? "G &middot; " + (gAuth.email ? gAuth.email.split("@")[0].toUpperCase().slice(0, 12) : "SYNCED")
+      : "G &middot; SIGN IN";
+  }
   if (signedIn) {
     const last = gAuth.lastSync ? " · last sync " + fmtDate(gAuth.lastSync) : "";
     setSyncStatus("Signed in as " + (gAuth.email || "…") + last, true);
@@ -293,6 +300,10 @@ function setupGoogleSync() {
   document.getElementById("gSignInBtn").addEventListener("click", gSignIn);
   document.getElementById("gSignOutBtn").addEventListener("click", gSignOut);
   document.getElementById("gSyncNowBtn").addEventListener("click", () => syncNow());
+  document.getElementById("gFootBtn").addEventListener("click", () => {
+    if (gAuthValid()) document.getElementById("settingsModal").classList.remove("hidden");
+    else gSignIn();
+  });
   updateGsyncUI();
   if (gAuthValid()) syncNow(); // resume session: pull latest from Drive
 }

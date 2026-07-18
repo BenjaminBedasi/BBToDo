@@ -264,6 +264,10 @@ body {
   border-top: 1px solid var(--line);
   padding-top: 12px;
 }
+.sidebar-foot.no-line { border-top: none; padding-top: 0; }
+.foot-btn.google { border-color: var(--accent2); color: var(--accent2); }
+.foot-btn.google:hover { border-color: var(--accent); color: var(--accent); }
+.foot-btn.google.synced { border-color: var(--accent); color: var(--accent); }
 .foot-btn {
   flex: 1;
   font-family: var(--mono);
