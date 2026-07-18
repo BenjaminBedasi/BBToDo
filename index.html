@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>BB // TODO</title>
 <link rel="stylesheet" href="styles.css">
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 <canvas id="particles"></canvas>
@@ -114,6 +115,19 @@
         <input type="checkbox" id="particlesToggle" checked>
         <span class="toggle-ui"></span>
       </label>
+    </div>
+
+    <div class="settings-section">
+      <div class="section-label">GOOGLE SYNC <span class="line"></span></div>
+      <p class="settings-note">Sign in to back up your lists and preferences to your Google account (stored in your Drive's private app-data area) and sync across devices.</p>
+      <div class="storage-row">
+        <button class="mini-btn accent" id="gSignInBtn">SIGN IN WITH GOOGLE</button>
+        <button class="mini-btn hidden" id="gSignOutBtn">SIGN OUT</button>
+        <button class="mini-btn hidden" id="gSyncNowBtn">SYNC NOW</button>
+      </div>
+      <div class="storage-row" style="margin-top:8px">
+        <span class="storage-status" id="gSyncStatus">Not signed in</span>
+      </div>
     </div>
 
     <div class="settings-section">

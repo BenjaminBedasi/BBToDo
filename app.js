@@ -25,9 +25,11 @@ function loadState() {
 
 let saveTimer = null;
 function saveState() {
+  state.updatedAt = Date.now();
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveToDisk, 600); // debounced file write
+  scheduleCloudPush(); // debounced Google Drive sync (no-op when signed out)
 }
 
 /* ---------- optional: save todos.json into the project folder ---------- */
@@ -114,6 +116,185 @@ function updateStorageStatus() {
     el.textContent = "Browser storage only";
     el.classList.remove("linked");
   }
+}
+
+/* ---------- Google sign-in & Drive sync ---------- */
+const GOOGLE_CLIENT_ID = "370596124152-bnrhbmtue9eb5876mo4dfa9ov0uf6o5a.apps.googleusercontent.com";
+const GAUTH_KEY = "edge-todo-gauth";
+const GSCOPES = "https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/userinfo.email";
+
+let gAuth = null;       // {token, expiry, email, fileId, lastSync}
+let gTokenClient = null;
+let syncTimer = null;
+
+function gAuthValid() { return gAuth && gAuth.token && gAuth.expiry > Date.now(); }
+
+function gAuthSave() {
+  if (gAuth) localStorage.setItem(GAUTH_KEY, JSON.stringify(gAuth));
+  else localStorage.removeItem(GAUTH_KEY);
+}
+
+function setSyncStatus(msg, ok) {
+  const el = document.getElementById("gSyncStatus");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle("linked", !!ok);
+}
+
+function updateGsyncUI() {
+  const signedIn = gAuthValid();
+  document.getElementById("gSignInBtn").classList.toggle("hidden", signedIn);
+  document.getElementById("gSignOutBtn").classList.toggle("hidden", !signedIn);
+  document.getElementById("gSyncNowBtn").classList.toggle("hidden", !signedIn);
+  if (signedIn) {
+    const last = gAuth.lastSync ? " · last sync " + fmtDate(gAuth.lastSync) : "";
+    setSyncStatus("Signed in as " + (gAuth.email || "…") + last, true);
+  } else if (gAuth && gAuth.email) {
+    setSyncStatus("Session expired — sign in again to sync (" + gAuth.email + ")");
+  } else {
+    setSyncStatus("Not signed in");
+  }
+}
+
+function ensureTokenClient() {
+  if (gTokenClient) return true;
+  if (!window.google || !google.accounts || !google.accounts.oauth2) return false;
+  gTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GSCOPES,
+    callback: onGoogleToken
+  });
+  return true;
+}
+
+function gSignIn() {
+  if (location.protocol === "file:") {
+    alert("Google sign-in needs the app to run from a web address (e.g. the GitHub Pages site or http://localhost) — it cannot work when opened as a file.");
+    return;
+  }
+  if (!ensureTokenClient()) {
+    alert("Google sign-in library has not loaded yet — check your internet connection and try again.");
+    return;
+  }
+  gTokenClient.requestAccessToken({ prompt: gAuth && gAuth.email ? "" : "consent" });
+}
+
+async function onGoogleToken(resp) {
+  if (resp.error) { setSyncStatus("Sign-in failed: " + resp.error); return; }
+  gAuth = Object.assign(gAuth || {}, {
+    token: resp.access_token,
+    expiry: Date.now() + (Number(resp.expires_in || 3600) - 60) * 1000
+  });
+  try {
+    const r = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+      headers: { Authorization: "Bearer " + gAuth.token }
+    });
+    if (r.ok) gAuth.email = (await r.json()).email;
+  } catch (e) {}
+  gAuthSave();
+  updateGsyncUI();
+  syncNow();
+}
+
+function gSignOut() {
+  if (gAuth && gAuth.token && window.google?.accounts?.oauth2) {
+    try { google.accounts.oauth2.revoke(gAuth.token, () => {}); } catch (e) {}
+  }
+  gAuth = null;
+  gAuthSave();
+  updateGsyncUI();
+}
+
+async function gFetch(url, opts = {}) {
+  const r = await fetch(url, {
+    ...opts,
+    headers: Object.assign({ Authorization: "Bearer " + gAuth.token }, opts.headers || {})
+  });
+  if (r.status === 401 || r.status === 403) {
+    gAuth.token = null;
+    gAuthSave();
+    updateGsyncUI();
+    throw new Error("auth-expired");
+  }
+  if (!r.ok) throw new Error("drive-http-" + r.status);
+  return r;
+}
+
+async function driveFindFile() {
+  if (gAuth.fileId) return gAuth.fileId;
+  const q = encodeURIComponent("name='todos.json'");
+  const r = await gFetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&fields=files(id,name)&q=${q}`);
+  const j = await r.json();
+  gAuth.fileId = j.files && j.files[0] ? j.files[0].id : null;
+  return gAuth.fileId;
+}
+
+async function driveDownload(fileId) {
+  const r = await gFetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`);
+  return r.json();
+}
+
+async function driveUpload(fileId) {
+  const body = JSON.stringify(state);
+  if (fileId) {
+    await gFetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body
+    });
+    return fileId;
+  }
+  const boundary = "bb_todo_" + uid();
+  const multi =
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+    JSON.stringify({ name: "todos.json", parents: ["appDataFolder"] }) +
+    `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n${body}\r\n--${boundary}--`;
+  const r = await gFetch("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id", {
+    method: "POST",
+    headers: { "Content-Type": "multipart/related; boundary=" + boundary },
+    body: multi
+  });
+  return (await r.json()).id;
+}
+
+/* pull newer cloud state (unless pushOnly), then push local */
+async function syncNow(pushOnly = false) {
+  if (!gAuthValid()) { updateGsyncUI(); return; }
+  setSyncStatus("Syncing…", true);
+  try {
+    let fileId = await driveFindFile();
+    if (fileId && !pushOnly) {
+      const cloud = await driveDownload(fileId);
+      if (cloud && (cloud.updatedAt || 0) > (state.updatedAt || 0)) {
+        state = Object.assign(state, cloud);
+        state.accents = Object.assign({ ...DEFAULT_ACCENTS }, state.accents);
+        applyTheme();
+        render(); // re-saves locally and re-schedules a push; harmless
+      }
+    }
+    gAuth.fileId = await driveUpload(fileId);
+    gAuth.lastSync = Date.now();
+    gAuthSave();
+    updateGsyncUI();
+  } catch (e) {
+    if (e.message !== "auth-expired") setSyncStatus("Sync failed — will retry on next change");
+    console.warn("Google sync failed", e);
+  }
+}
+
+function scheduleCloudPush() {
+  if (!gAuthValid()) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => syncNow(true), 2000);
+}
+
+function setupGoogleSync() {
+  try { gAuth = JSON.parse(localStorage.getItem(GAUTH_KEY)); } catch (e) {}
+  document.getElementById("gSignInBtn").addEventListener("click", gSignIn);
+  document.getElementById("gSignOutBtn").addEventListener("click", gSignOut);
+  document.getElementById("gSyncNowBtn").addEventListener("click", () => syncNow());
+  updateGsyncUI();
+  if (gAuthValid()) syncNow(); // resume session: pull latest from Drive
 }
 
 /* ---------- helpers ---------- */
@@ -656,6 +837,7 @@ setupSidebar();
 setupAddItem();
 setupBoardDnD();
 setupSettings();
+setupGoogleSync();
 resizeCanvas();
 initParticles();
 tick();
