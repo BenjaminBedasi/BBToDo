@@ -20,7 +20,36 @@ function loadState() {
     const raw = localStorage.getItem(STORE_KEY);
     if (raw) state = Object.assign(state, JSON.parse(raw));
   } catch (e) { console.warn("Could not load saved data", e); }
+  normalizeState();
+}
+
+/* enforce the data shape on every load so nested tasks never surface as
+   top-level tasks (and malformed nodes can't crash render) */
+function normalizeState() {
+  if (!Array.isArray(state.lists)) state.lists = [];
+  state.lists.forEach((list) => {
+    if (!Array.isArray(list.items)) list.items = [];
+
+    /* every id that legitimately lives inside a sublist */
+    const subIds = new Set();
+    list.items.forEach((it) => {
+      if (it && Array.isArray(it.sub)) it.sub.forEach((s) => s && s.id && subIds.add(s.id));
+    });
+
+    list.items = list.items
+      .filter((it) => it && !subIds.has(it.id)) // drop a top-level copy of a sub-task
+      .map((it) => ({
+        id: it.id || uid(),
+        text: typeof it.text === "string" ? it.text : "",
+        done: !!it.done,
+        doneAt: it.doneAt || null,
+        sub: (Array.isArray(it.sub) ? it.sub : [])
+          .filter((s) => s && (typeof s.text === "string"))
+          .map((s) => ({ id: s.id || uid(), text: s.text, done: !!s.done, doneAt: s.doneAt || null }))
+      }));
+  });
   state.accents = Object.assign({ ...DEFAULT_ACCENTS }, state.accents);
+  if (!getList(state.activeListId)) state.activeListId = state.lists[0] ? state.lists[0].id : null;
 }
 
 let saveTimer = null;
@@ -69,9 +98,34 @@ async function linkFolder() {
   try {
     dirHandle = await window.showDirectoryPicker({ mode: "readwrite" });
     await idbSet("dir", dirHandle);
-    await saveToDisk();
+    /* adopt the folder's existing data instead of overwriting it */
+    const loaded = await loadFromDisk(true);
+    if (!loaded) await saveToDisk(); // folder had no todos.json yet — seed it
     updateStorageStatus();
   } catch (e) { /* user cancelled */ }
+}
+
+/* read todos.json from the linked folder.
+   preferDisk=true  -> adopt the folder's data if it has any lists (used when linking)
+   preferDisk=false -> adopt only if the folder copy is newer (used on auto-restore) */
+async function loadFromDisk(preferDisk) {
+  if (!dirHandle) return false;
+  try {
+    const fh = await dirHandle.getFileHandle("todos.json"); // no create: throws if absent
+    const text = await (await fh.getFile()).text();
+    if (!text.trim()) return false;
+    const disk = JSON.parse(text);
+    const hasData = Array.isArray(disk.lists) && disk.lists.length > 0;
+    const diskNewer = (disk.updatedAt || 0) > (state.updatedAt || 0);
+    if (preferDisk ? hasData : diskNewer) {
+      state = Object.assign(state, disk);
+      normalizeState();
+      applyTheme();
+      render();
+      return true;
+    }
+  } catch (e) { /* no file yet, or unreadable */ }
+  return false;
 }
 
 async function restoreFolder() {
@@ -79,14 +133,17 @@ async function restoreFolder() {
     const h = await idbGet("dir");
     if (!h) return;
     const perm = await h.queryPermission({ mode: "readwrite" });
-    if (perm === "granted") dirHandle = h;
-    else if (perm === "prompt") {
+    if (perm === "granted") {
+      dirHandle = h;
+      await loadFromDisk(false); // auto-load newer folder data
+    } else if (perm === "prompt") {
       // re-request on first user interaction
       const once = async () => {
         document.removeEventListener("pointerdown", once);
         try {
           if ((await h.requestPermission({ mode: "readwrite" })) === "granted") {
             dirHandle = h;
+            await loadFromDisk(false);
             updateStorageStatus();
           }
         } catch (e) {}
@@ -274,7 +331,7 @@ async function syncNow(pushOnly = false) {
       const cloud = await driveDownload(fileId);
       if (cloud && (cloud.updatedAt || 0) > (state.updatedAt || 0)) {
         state = Object.assign(state, cloud);
-        state.accents = Object.assign({ ...DEFAULT_ACCENTS }, state.accents);
+        normalizeState();
         applyTheme();
         render(); // re-saves locally and re-schedules a push; harmless
       }
@@ -434,6 +491,7 @@ function renderItem(list, item) {
 
   row.querySelector(".chk").addEventListener("change", (e) => {
     item.done = e.target.checked;
+    item.doneAt = e.target.checked ? Date.now() : null;
     render();
   });
   row.querySelector(".del").addEventListener("click", () => {
@@ -441,6 +499,13 @@ function renderItem(list, item) {
     render();
   });
   makeEditable(row.querySelector(".item-text"), (txt) => { item.text = txt; render(); });
+
+  if (item.done && item.doneAt) {
+    const doneEl = document.createElement("div");
+    doneEl.className = "done-at";
+    doneEl.textContent = "COMPLETED " + fmtDate(item.doneAt);
+    el.appendChild(doneEl);
+  }
 
   /* sublist */
   const sub = document.createElement("div");
@@ -483,6 +548,7 @@ function renderSubitem(list, item, s) {
     <span class="drag-handle" title="Drag to move">&#8942;&#8942;</span>
     <input type="checkbox" class="chk" ${s.done ? "checked" : ""}>
     <div class="item-text" title="Double-click to edit"></div>
+    ${s.done && s.doneAt ? `<span class="done-at-inline">${fmtDate(s.doneAt)}</span>` : ""}
     <div class="item-actions">
       <button class="act-btn del" title="Delete">DEL</button>
     </div>`;
@@ -490,6 +556,7 @@ function renderSubitem(list, item, s) {
 
   el.querySelector(".chk").addEventListener("change", (e) => {
     s.done = e.target.checked;
+    s.doneAt = e.target.checked ? Date.now() : null;
     render();
   });
   el.querySelector(".del").addEventListener("click", () => {

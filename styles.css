@@ -522,6 +522,25 @@ body {
   clip-path: polygon(0 0, 100% 50%, 0 100%);
 }
 
+.done-at {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  padding: 2px 12px 6px 44px;
+  opacity: 0.75;
+}
+
+.done-at-inline {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  white-space: nowrap;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
+
 .board-hint {
   margin-top: 18px;
   font-family: var(--mono);
