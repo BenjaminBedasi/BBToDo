@@ -12,7 +12,7 @@ let state = {
   particles: true,
   accents: { ...DEFAULT_ACCENTS },
   activeListId: null,
-  lists: [] // {id, name, createdAt, items:[{id, text, done, sub:[{id, text, done}]}]}
+  lists: [] // {id, name, createdAt, items:[{id, text, done, sub:[{id, text, done}]}], notes:[{id, text, createdAt, tags:[{listId, itemId, subId, text}]}]}
 };
 
 function loadState() {
@@ -47,9 +47,48 @@ function normalizeState() {
           .filter((s) => s && (typeof s.text === "string"))
           .map((s) => ({ id: s.id || uid(), text: s.text, done: !!s.done, doneAt: s.doneAt || null }))
       }));
+
+    if (!Array.isArray(list.notes)) list.notes = [];
+    list.notes = list.notes.map((n) => ({
+      id: n.id || uid(),
+      text: typeof n.text === "string" ? n.text : "",
+      createdAt: n.createdAt || Date.now(),
+      tags: (Array.isArray(n.tags) ? n.tags : [])
+        .filter((t) => t && t.itemId)
+        .map((t) => ({
+          listId: t.listId || null,
+          itemId: t.itemId,
+          subId: t.subId || null,
+          text: typeof t.text === "string" ? t.text : ""
+        }))
+    }));
   });
   state.accents = Object.assign({ ...DEFAULT_ACCENTS }, state.accents);
   if (!getList(state.activeListId)) state.activeListId = state.lists[0] ? state.lists[0].id : null;
+
+  /* one-time migration: move old global state.notes into per-list notes */
+  if (Array.isArray(state.notes) && state.notes.length > 0) {
+    state.notes.forEach((n) => {
+      const targetListId = n.tags && n.tags[0] ? n.tags[0].listId : null;
+      const dest = (targetListId ? getList(targetListId) : null) || state.lists[0];
+      if (!dest) return;
+      if (!Array.isArray(dest.notes)) dest.notes = [];
+      dest.notes.push({
+        id: n.id || uid(),
+        text: typeof n.text === "string" ? n.text : "",
+        createdAt: n.createdAt || Date.now(),
+        tags: (Array.isArray(n.tags) ? n.tags : [])
+          .filter((t) => t && t.itemId)
+          .map((t) => ({
+            listId: t.listId || null,
+            itemId: t.itemId,
+            subId: t.subId || null,
+            text: typeof t.text === "string" ? t.text : ""
+          }))
+      });
+    });
+    delete state.notes;
+  }
 }
 
 let saveTimer = null;
@@ -395,10 +434,17 @@ function extractNode(listId, itemId, subId) {
   return list.items.splice(idx, 1)[0];
 }
 
+/* stable sort that pushes completed entries to the bottom, keeping the
+   relative order within the done / not-done groups intact */
+function sortDoneToBottom(arr) {
+  arr.sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1));
+}
+
 /* ---------- rendering ---------- */
 function render() {
   renderSidebar();
   renderBoard();
+  renderNotes();
   saveState();
 }
 
@@ -492,6 +538,7 @@ function renderItem(list, item) {
   row.querySelector(".chk").addEventListener("change", (e) => {
     item.done = e.target.checked;
     item.doneAt = e.target.checked ? Date.now() : null;
+    sortDoneToBottom(list.items); // completed tasks drop to the bottom
     render();
   });
   row.querySelector(".del").addEventListener("click", () => {
@@ -557,6 +604,7 @@ function renderSubitem(list, item, s) {
   el.querySelector(".chk").addEventListener("change", (e) => {
     s.done = e.target.checked;
     s.doneAt = e.target.checked ? Date.now() : null;
+    sortDoneToBottom(item.sub); // completed sub-tasks drop to the bottom
     render();
   });
   el.querySelector(".del").addEventListener("click", () => {
@@ -625,6 +673,202 @@ function makeEditable(el, onDone) {
       if (e.key === "Escape") { el.removeEventListener("blur", finish); el.contentEditable = "false"; render(); }
     });
   });
+}
+
+/* ---------- sticky notes ---------- */
+/* resolve a tag against live state so chips track renames / deletions */
+function resolveTag(tag) {
+  const list = getList(tag.listId);
+  if (list) {
+    const item = findItem(list, tag.itemId);
+    if (item) {
+      if (tag.subId) {
+        const s = item.sub.find((x) => x.id === tag.subId);
+        if (s) return { text: s.text, done: s.done, exists: true, listId: list.id };
+      } else {
+        return { text: item.text, done: item.done, exists: true, listId: list.id };
+      }
+    }
+  }
+  return { text: tag.text, done: false, exists: false, listId: tag.listId };
+}
+
+function openNotes() {
+  $("notesDock").classList.add("open");
+  $("notesReveal").classList.add("hidden");
+}
+function closeNotes() {
+  $("notesDock").classList.remove("open");
+  $("notesReveal").classList.remove("hidden");
+}
+
+function flashItem(itemId, subId) {
+  requestAnimationFrame(() => {
+    const target = subId
+      ? document.querySelector(`.subitem[data-sub-id="${subId}"]`)
+      : document.querySelector(`.item[data-item-id="${itemId}"]`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+    target.classList.add("flash");
+    setTimeout(() => target.classList.remove("flash"), 1200);
+  });
+}
+
+/* add a task reference to a note from a drag payload (never moves the task) */
+function addTagFromDrag(note, d) {
+  const list = getList(d.listId);
+  if (!list) return;
+  const item = findItem(list, d.itemId);
+  if (!item) return;
+  let text = item.text, subId = null;
+  if (d.subId) {
+    const s = item.sub.find((x) => x.id === d.subId);
+    if (!s) return;
+    text = s.text;
+    subId = d.subId;
+  }
+  const dup = note.tags.some((t) => t.itemId === d.itemId && (t.subId || null) === subId);
+  if (dup) return;
+  note.tags.push({ listId: d.listId, itemId: d.itemId, subId, text });
+}
+
+function renderTag(note, tag) {
+  const r = resolveTag(tag);
+  const chip = document.createElement("span");
+  chip.className = "note-tag" + (r.exists ? "" : " gone") + (r.done ? " done" : "");
+
+  const label = document.createElement("span");
+  label.className = "note-tag-text";
+  label.textContent = r.exists ? r.text : (tag.text || "removed task");
+  chip.appendChild(label);
+
+  if (r.exists) {
+    chip.title = "Jump to this task";
+    label.addEventListener("click", () => {
+      state.activeListId = r.listId;
+      render();
+      flashItem(tag.itemId, tag.subId);
+    });
+  }
+
+  const x = document.createElement("button");
+  x.className = "note-tag-x";
+  x.innerHTML = "&#10005;";
+  x.title = "Remove tag";
+  x.addEventListener("click", (e) => {
+    e.stopPropagation();
+    note.tags = note.tags.filter((t) => t !== tag);
+    render();
+  });
+  chip.appendChild(x);
+
+  return chip;
+}
+
+function renderNote(note) {
+  const el = document.createElement("div");
+  el.className = "note";
+  el.dataset.noteId = note.id;
+
+  const bar = document.createElement("div");
+  bar.className = "note-bar";
+  const del = document.createElement("button");
+  del.className = "note-del";
+  del.innerHTML = "&#10005;";
+  del.title = "Delete note";
+  del.addEventListener("click", () => {
+    if (!confirm("Delete this sticky note?")) return;
+    const list = activeList();
+    if (list) list.notes = list.notes.filter((n) => n.id !== note.id);
+    render();
+  });
+  bar.appendChild(del);
+  el.appendChild(bar);
+
+  const ta = document.createElement("textarea");
+  ta.className = "note-text";
+  ta.dataset.noteId = note.id;
+  ta.placeholder = "Write a note…";
+  ta.value = note.text;
+  ta.addEventListener("input", () => { note.text = ta.value; saveState(); });
+  el.appendChild(ta);
+
+  const tags = document.createElement("div");
+  tags.className = "note-tags";
+  note.tags.forEach((tag) => tags.appendChild(renderTag(note, tag)));
+  el.appendChild(tags);
+
+  const hint = document.createElement("div");
+  hint.className = "note-drophint";
+  hint.textContent = "Drop a task here to tag it";
+  el.appendChild(hint);
+
+  /* whole card is a drop target for tagging (does NOT move the task) */
+  el.addEventListener("dragover", (e) => {
+    if (!dragData) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move"; // match dragstart's effectAllowed so the drop is permitted
+    el.classList.add("note-drag-over");
+  });
+  el.addEventListener("dragleave", (e) => {
+    if (!el.contains(e.relatedTarget)) el.classList.remove("note-drag-over");
+  });
+  el.addEventListener("drop", (e) => {
+    if (!dragData) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.remove("note-drag-over");
+    addTagFromDrag(note, dragData);
+    dragData = null;
+    render();
+  });
+
+  return el;
+}
+
+function renderNotes() {
+  const scroll = $("notesScroll");
+  if (!scroll) return;
+
+  /* keep caret position if a note textarea is focused during a re-render */
+  let focus = null;
+  const ae = document.activeElement;
+  if (ae && ae.classList && ae.classList.contains("note-text")) {
+    focus = { id: ae.dataset.noteId, start: ae.selectionStart, end: ae.selectionEnd };
+  }
+
+  scroll.innerHTML = "";
+  const list = activeList();
+  const notes = list ? list.notes : [];
+  if (!notes.length) {
+    const empty = document.createElement("div");
+    empty.className = "notes-empty";
+    empty.textContent = list ? "No notes yet — press + to add one." : "Select a list to see its notes.";
+    scroll.appendChild(empty);
+    return;
+  }
+  notes.forEach((note) => scroll.appendChild(renderNote(note)));
+
+  if (focus) {
+    const ta = scroll.querySelector(`.note-text[data-note-id="${focus.id}"]`);
+    if (ta) { ta.focus(); try { ta.setSelectionRange(focus.start, focus.end); } catch (e) {} }
+  }
+}
+
+function setupNotes() {
+  $("addNoteBtn").addEventListener("click", () => {
+    const list = activeList();
+    if (!list) return;
+    list.notes.unshift({ id: uid(), text: "", createdAt: Date.now(), tags: [] });
+    openNotes();
+    render();
+    requestAnimationFrame(() => {
+      const ta = $("notesScroll").querySelector(".note-text");
+      if (ta) ta.focus();
+    });
+  });
+  $("closeNotesBtn").addEventListener("click", closeNotes);
+  $("notesReveal").addEventListener("click", openNotes);
 }
 
 /* ---------- drag & drop ---------- */
@@ -724,7 +968,7 @@ function setupSidebar() {
 
   const create = () => {
     const name = input.value.trim() || fmtDate(Date.now());
-    const list = { id: uid(), name, createdAt: Date.now(), items: [] };
+    const list = { id: uid(), name, createdAt: Date.now(), items: [], notes: [] };
     state.lists.unshift(list);
     state.activeListId = list.id;
     form.classList.add("hidden");
@@ -915,6 +1159,7 @@ setupSidebar();
 setupAddItem();
 setupBoardDnD();
 setupSettings();
+setupNotes();
 setupGoogleSync();
 resizeCanvas();
 initParticles();
@@ -928,6 +1173,7 @@ if (state.lists.length === 0) {
     id: uid(),
     name: "My First List",
     createdAt: Date.now(),
+    notes: [],
     items: [
       { id: uid(), text: "Drag me to reorder", done: false, sub: [] },
       {

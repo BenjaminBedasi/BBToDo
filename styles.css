@@ -683,6 +683,188 @@ body {
 .storage-status { font-family: var(--mono); font-size: 11px; color: var(--text-dim); }
 .storage-status.linked { color: var(--accent); }
 
+/* ============ STICKY NOTES DOCK ============ */
+.notes-reveal {
+  position: fixed;
+  bottom: 18px;
+  right: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 1px;
+  font-weight: 700;
+  padding: 8px 12px;
+  cursor: pointer;
+  clip-path: polygon(8px 0, 100% 0, 100% 100%, 0 100%, 0 8px);
+}
+.notes-reveal:hover { filter: brightness(1.15); }
+.notes-reveal span { font-size: 11px; }
+
+.notes-dock {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  height: 72vh;
+  max-height: 72vh;
+  z-index: 7;
+  width: 340px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  border-left: 1px solid var(--line-strong);
+  border-top: 1px solid var(--line-strong);
+  box-shadow: -8px -4px 24px rgba(0, 0, 0, 0.28);
+  transform: translateX(100%);
+  transition: transform 0.25s ease;
+}
+.notes-dock.open { transform: translateX(0); }
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.notes-title {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 2px;
+  color: var(--accent);
+}
+.notes-head-actions { display: flex; gap: 6px; }
+
+.notes-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.notes-empty {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+  margin-top: 20px;
+  letter-spacing: 0.5px;
+}
+.notes-foot {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.note {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
+  box-shadow: var(--shadow);
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.note.note-drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  filter: brightness(1.04);
+}
+
+.note-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.note-del {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 5px;
+}
+.note-del:hover { border-color: var(--danger); color: var(--danger); }
+
+.note-text {
+  width: 100%;
+  min-height: 96px;
+  resize: vertical;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.note-text::placeholder { color: var(--text-dim); }
+
+.note-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.note-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  background: var(--accent-dim);
+  border: 1px solid var(--line-strong);
+  padding: 3px 4px 3px 8px;
+  font-size: 11px;
+  color: var(--text);
+}
+.note-tag-text {
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 210px;
+}
+.note-tag.done .note-tag-text { text-decoration: line-through; opacity: 0.7; }
+.note-tag.gone .note-tag-text { text-decoration: line-through; opacity: 0.5; cursor: default; }
+.note-tag-x {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 3px;
+}
+.note-tag-x:hover { color: var(--danger); }
+
+.note-drophint {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.5px;
+  color: var(--text-dim);
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 6px;
+}
+
+/* highlight a task jumped-to from a note tag */
+.item.flash, .subitem.flash {
+  animation: flashPulse 1.2s ease;
+}
+@keyframes flashPulse {
+  0%, 100% { background: var(--panel); }
+  30% { background: var(--accent-dim); border-color: var(--accent); }
+}
+
 /* scrollbars */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg2); }
